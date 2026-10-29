@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Calculator",
+    "description": "Deterministic math expression engine tool for the agent: scientific functions, variables, batches, and exact decimal mode."
+  }
+}

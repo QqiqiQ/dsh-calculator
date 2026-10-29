@@ -1,0 +1,45 @@
+{
+  "name": "@qqiqiq/dsh-calculator",
+  "version": "1.0.0",
+  "description": "Deterministic math tool for DSH agents: hand-written parser (no eval), 50-expression batches, and an exact-decimal mode for money math.",
+  "type": "module",
+  "license": "MIT",
+  "author": "QqiqiQ",
+  "homepage": "https://github.com/QqiqiQ/dsh-calculator#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QqiqiQ/dsh-calculator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/QqiqiQ/dsh-calculator/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "calculator",
+    "math",
+    "tool",
+    "precision",
+    "decimal"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "core.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "opencode/tools/calculate.ts",
+    "icon.svg",
+    "icon.png"
+  ],
+  "icon": "./icon.svg",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
