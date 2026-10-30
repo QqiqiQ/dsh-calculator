@@ -58,7 +58,7 @@ function tokenize(src) {
     if (c === '*' && src[i + 1] === '*') { tokens.push({ t: 'op', v: '^', pos: i }); i += 2; continue; }
     const alias = { '×': '*', '÷': '/', '−': '-' };
     const op = alias[c] ?? c;
-    if ('+-*/%^!(),'.includes(op)) { tokens.push({ t: 'op', v: op, pos: i }); i++; continue; }
+    if ("()+-*/%^![],'".includes(op)) { tokens.push({ t: 'op', v: op, pos: i }); i++; continue; }
     throw new CalcError(`Unexpected character '${c}'`, i);
   }
   tokens.push({ t: 'end', pos: src.length });
@@ -118,9 +118,9 @@ function parse(src) {
 
   function parsePostfix() {
     let e = parsePrimary();
-    while (peek().t === 'op' && peek().v === '!') {
+    while (peek().t === 'op' && (peek().v === '!' || peek().v === "'")) {
       const tk = next();
-      e = { k: 'fact', e, pos: tk.pos };
+      e = tk.v === '!' ? { k: 'fact', e, pos: tk.pos } : { k: 'tpose', e, pos: tk.pos };
     }
     return e;
   }
@@ -140,6 +140,16 @@ function parse(src) {
         return { k: 'call', name: tk.v, args, pos: tk.pos };
       }
       return { k: 'ident', name: tk.v, pos: tk.pos };
+    }
+    if (tk.t === 'op' && tk.v === '[') {
+      const items = [];
+      if (!(peek().t === 'op' && peek().v === ']')) {
+        items.push(parseExpr());
+        while (peek().t === 'op' && peek().v === ',') { next(); items.push(parseExpr()); }
+      }
+      expectOp(']');
+      if (items.length === 0) throw new CalcError('empty list literal', tk.pos);
+      return { k: 'vec', items, pos: tk.pos };
     }
     if (tk.t === 'op' && tk.v === '(') {
       const e = parseExpr();
@@ -260,6 +270,289 @@ function powFloat(a, b, pos) {
   return r;
 }
 
+/* ------------------------------- matrices ---------------------------------- */
+
+/** Matrix value: { data: number[][] }, always rectangular, ≥1 row/col. Row vectors are 1×n. */
+const isMat = (v) => v !== null && typeof v === 'object' && Array.isArray(v.data);
+const mat = (data) => ({ data });
+
+const MAX_MATRIX_ELEMENTS = 1_000_000;
+
+function identity(n) {
+  return mat(Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))));
+}
+
+function matTranspose(a) {
+  const rows = a.data.length, cols = a.data[0].length;
+  const out = Array.from({ length: cols }, () => new Array(rows));
+  for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) out[j][i] = a.data[i][j];
+  return mat(out);
+}
+
+function shapeMismatch(a, b, pos, op) {
+  const sa = `${a.data.length}x${a.data[0].length}`, sb = `${b.data.length}x${b.data[0].length}`;
+  return new CalcError(`matrix size mismatch: ${sa} ${op} ${sb}`, pos);
+}
+
+function matElementwise(a, b, op, pos) {
+  if (a.data.length !== b.data.length || a.data[0].length !== b.data[0].length) throw shapeMismatch(a, b, pos, op);
+  const f = op === '+' ? (x, y) => x + y : (x, y) => x - y;
+  return mat(a.data.map((row, i) => row.map((x, j) => f(x, b.data[i][j]))));
+}
+
+function matScale(a, s) {
+  return mat(a.data.map((row) => row.map((x) => x * s)));
+}
+
+function matmul(a, b, pos) {
+  const ar = a.data.length, ac = a.data[0].length;
+  let rhs = b.data;
+  let br = b.data.length, bc = b.data[0].length;
+  // Convenience: a row vector on the right of an m×n matrix acts as a column vector
+  // (A * [x,y] == A * [x,y]'), and the result comes back as a row vector.
+  const vectorRhs = br === 1 && bc === ac && ac !== 1;
+  if (vectorRhs) {
+    rhs = b.data[0].map((v) => [v]);
+    br = ac; bc = 1;
+  }
+  if (ac !== br) throw shapeMismatch(a, b, pos, '*');
+  const out = Array.from({ length: ar }, () => new Array(bc).fill(0));
+  for (let i = 0; i < ar; i++) {
+    for (let k = 0; k < ac; k++) {
+      const aik = a.data[i][k];
+      if (aik === 0) continue;
+      for (let j = 0; j < bc; j++) out[i][j] += aik * rhs[k][j];
+    }
+  }
+  return vectorRhs ? mat([out.map((r) => r[0])]) : mat(out);
+}
+
+function needSquare(a, name, pos) {
+  if (a.data.length !== a.data[0].length) throw new CalcError(`${name} requires a square matrix`, pos);
+}
+
+function matDet(a, pos) {
+  needSquare(a, 'det', pos);
+  const n = a.data.length;
+  const m = a.data.map((r) => r.slice());
+  let sign = 1, det = 1;
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(m[r][col]) > Math.abs(m[piv][col])) piv = r;
+    if (m[piv][col] === 0) return 0;
+    if (piv !== col) { [m[piv], m[col]] = [m[col], m[piv]]; sign = -sign; }
+    const p = m[col][col];
+    det *= p;
+    for (let r = col + 1; r < n; r++) {
+      const f = m[r][col] / p;
+      for (let c = col; c < n; c++) m[r][c] -= f * m[col][c];
+    }
+  }
+  return det * sign;
+}
+
+function matInv(a, pos) {
+  needSquare(a, 'inv', pos);
+  const n = a.data.length;
+  const m = a.data.map((r, i) => [...r, ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))]);
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(m[r][col]) > Math.abs(m[piv][col])) piv = r;
+    if (m[piv][col] === 0) throw new CalcError('matrix is singular (not invertible)', pos);
+    if (piv !== col) [m[piv], m[col]] = [m[col], m[piv]];
+    const p = m[col][col];
+    for (let c = 0; c < 2 * n; c++) m[col][c] /= p;
+    for (let r = 0; r < n; r++) {
+      if (r === col) continue;
+      const f = m[r][col];
+      if (f === 0) continue;
+      for (let c = 0; c < 2 * n; c++) m[r][c] -= f * m[col][c];
+    }
+  }
+  return mat(m.map((r) => r.slice(n)));
+}
+
+function matSolve(a, b, pos) {
+  needSquare(a, 'solve', pos);
+  const n = a.data.length;
+  let bb;
+  if (b.data.length === 1 && b.data[0].length === n) bb = b.data[0].map((v) => [v]); // row vector -> column
+  else if (b.data.length === n) bb = b.data.map((r) => r.slice());
+  else throw new CalcError(`solve: right-hand side must be a length-${n} vector or ${n}-row matrix`, pos);
+  const k = bb[0].length;
+  const m = a.data.map((r, i) => [...r, ...bb[i]]);
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(m[r][col]) > Math.abs(m[piv][col])) piv = r;
+    if (m[piv][col] === 0) throw new CalcError('no unique solution (coefficient matrix is singular)', pos);
+    if (piv !== col) [m[piv], m[col]] = [m[col], m[piv]];
+    for (let r = col + 1; r < n; r++) {
+      const f = m[r][col] / m[col][col];
+      if (f === 0) continue;
+      for (let c = col; c < n + k; c++) m[r][c] -= f * m[col][c];
+    }
+  }
+  const x = Array.from({ length: n }, () => new Array(k));
+  for (let col = n - 1; col >= 0; col--) {
+    for (let j = 0; j < k; j++) {
+      let s = m[col][n + j];
+      for (let c = col + 1; c < n; c++) s -= m[col][c] * x[c][j];
+      x[col][j] = s / m[col][col];
+    }
+  }
+  return k === 1 ? mat([x.map((r) => r[0])]) : mat(x); // single rhs -> row vector back
+}
+
+function matRank(a) {
+  const m = a.data.map((r) => r.slice());
+  const rows = m.length, cols = m[0].length;
+  let maxAbs = 0;
+  for (const r of m) for (const v of r) if (Math.abs(v) > maxAbs) maxAbs = Math.abs(v);
+  const tol = Number.EPSILON * Math.max(rows, cols) * (maxAbs || 1);
+  let rank = 0, r0 = 0;
+  for (let col = 0; col < cols && r0 < rows; col++) {
+    let piv = r0;
+    for (let r = r0 + 1; r < rows; r++) if (Math.abs(m[r][col]) > Math.abs(m[piv][col])) piv = r;
+    if (Math.abs(m[piv][col]) <= tol) continue;
+    [m[piv], m[r0]] = [m[r0], m[piv]];
+    for (let r = r0 + 1; r < rows; r++) {
+      const f = m[r][col] / m[r0][col];
+      if (f === 0) continue;
+      for (let c = col; c < cols; c++) m[r][c] -= f * m[r0][c];
+    }
+    r0++; rank++;
+  }
+  return rank;
+}
+
+function matPow(a, n, pos) {
+  if (!Number.isInteger(n)) throw new CalcError('matrix exponent must be an integer', pos);
+  needSquare(a, 'matrix power', pos);
+  let base = a, e = n;
+  if (e < 0) { base = matInv(base, pos); e = -e; }
+  let result = identity(a.data.length);
+  while (e > 0) {
+    if (e & 1) result = matmul(result, base, pos);
+    e >>= 1;
+    if (e > 0) base = matmul(base, base, pos);
+  }
+  return result;
+}
+
+function scalarBin(op, l, r, pos) {
+  switch (op) {
+    case '+': return l + r;
+    case '-': return l - r;
+    case '*': return l * r;
+    case '/': if (r === 0) throw new CalcError('division by zero', pos); return l / r;
+    case '%': if (r === 0) throw new CalcError('modulo by zero', pos); return l % r;
+    case '^': return powFloat(l, r, pos);
+  }
+  throw new CalcError('internal: unknown operator');
+}
+
+function binOpFloat(op, l, r, pos) {
+  const lm = isMat(l), rm = isMat(r);
+  if (!lm && !rm) return scalarBin(op, l, r, pos);
+  if (lm && rm) {
+    switch (op) {
+      case '+': case '-': return matElementwise(l, r, op, pos);
+      case '*': return matmul(l, r, pos);
+      case '/': throw new CalcError('matrix/matrix division is undefined; use solve(A, B) or A * inv(B)', pos);
+      case '%': throw new CalcError('modulo is undefined for matrices', pos);
+      case '^': throw new CalcError('matrix exponent must be a scalar integer, not a matrix', pos);
+    }
+  }
+  if (lm) {
+    switch (op) {
+      case '*': return matScale(l, r);
+      case '/': if (r === 0) throw new CalcError('division by zero', pos); return matScale(l, 1 / r);
+      case '^': return matPow(l, r, pos);
+      case '+': case '-': throw new CalcError(`cannot ${op === '+' ? 'add' : 'subtract'} a scalar and a matrix`, pos);
+      case '%': throw new CalcError('modulo is undefined for matrices', pos);
+    }
+  }
+  switch (op) {
+    case '*': return matScale(r, l);
+    case '+': case '-': throw new CalcError(`cannot ${op === '+' ? 'add' : 'subtract'} a scalar and a matrix`, pos);
+    case '/': case '%': case '^': throw new CalcError(`'${op}' with a matrix right operand is undefined`, pos);
+  }
+  throw new CalcError('internal: unknown operator');
+}
+
+function needMat(v, name, pos) {
+  if (!isMat(v)) throw new CalcError(`function '${name}' expects a matrix argument`, pos);
+  return v;
+}
+
+function needVec(v, name, pos) {
+  if (!isMat(v) || v.data.length !== 1) throw new CalcError(`function '${name}' expects vector arguments like [1,2,3]`, pos);
+  return v.data[0];
+}
+
+function positiveInt(v, name, pos) {
+  if (!Number.isInteger(v) || v <= 0) throw new CalcError(`function '${name}' expects positive integer dimension(s)`, pos);
+  return v;
+}
+
+function matDims(a, name, pos) {
+  const r = positiveInt(a[0], name, pos);
+  const c = a.length === 2 ? positiveInt(a[1], name, pos) : r;
+  if (a.length > 2) throw new CalcError(`function '${name}' expects 1 or 2 argument(s), got ${a.length}`, pos);
+  if (r * c > MAX_MATRIX_ELEMENTS) throw new CalcError(`matrix too large (max ${MAX_MATRIX_ELEMENTS} elements)`, pos);
+  return [r, c];
+}
+
+const MATRIX_FUNCTIONS = {
+  det: (a, p) => { arity(a, 1, 'det', p); return matDet(needMat(a[0], 'det', p), p); },
+  inv: (a, p) => { arity(a, 1, 'inv', p); return matInv(needMat(a[0], 'inv', p), p); },
+  transpose: (a, p) => { arity(a, 1, 'transpose', p); return matTranspose(needMat(a[0], 'transpose', p)); },
+  trace: (a, p) => {
+    arity(a, 1, 'trace', p);
+    const m = needMat(a[0], 'trace', p);
+    needSquare(m, 'trace', p);
+    let s = 0;
+    for (let i = 0; i < m.data.length; i++) s += m.data[i][i];
+    return s;
+  },
+  rank: (a, p) => { arity(a, 1, 'rank', p); return matRank(needMat(a[0], 'rank', p)); },
+  solve: (a, p) => { arity(a, 2, 'solve', p); return matSolve(needMat(a[0], 'solve', p), needMat(a[1], 'solve', p), p); },
+  dot: (a, p) => {
+    arity(a, 2, 'dot', p);
+    const u = needVec(a[0], 'dot', p), v = needVec(a[1], 'dot', p);
+    if (u.length !== v.length) throw new CalcError(`dot: vector length mismatch (${u.length} vs ${v.length})`, p);
+    return u.reduce((s, x, i) => s + x * v[i], 0);
+  },
+  cross: (a, p) => {
+    arity(a, 2, 'cross', p);
+    const u = needVec(a[0], 'cross', p), v = needVec(a[1], 'cross', p);
+    if (u.length !== 3 || v.length !== 3) throw new CalcError('cross requires two 3-element vectors', p);
+    return mat([[u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]]);
+  },
+  norm: (a, p) => {
+    arity(a, 1, 'norm', p);
+    const m = needMat(a[0], 'norm', p);
+    return checked(Math.hypot(...m.data.flat()), p);
+  },
+  eye: (a, p) => { arity(a, 1, 'eye', p); return identity(positiveInt(a[0], 'eye', p)); },
+  zeros: (a, p) => { const [r, c] = matDims(a, 'zeros', p); return mat(Array.from({ length: r }, () => new Array(c).fill(0))); },
+  ones: (a, p) => { const [r, c] = matDims(a, 'ones', p); return mat(Array.from({ length: r }, () => new Array(c).fill(1))); },
+  shape: (a, p) => { arity(a, 1, 'shape', p); const m = needMat(a[0], 'shape', p); return mat([[m.data.length, m.data[0].length]]); },
+};
+
+function checkedAny(x, pos) {
+  if (isMat(x)) {
+    for (const row of x.data) {
+      for (const v of row) {
+        if (Number.isNaN(v)) throw new CalcError(DOMAIN, pos);
+        if (!Number.isFinite(v)) throw new CalcError('result overflowed to infinity', pos);
+      }
+    }
+    return x;
+  }
+  return checked(x, pos);
+}
+
 function evalFloat(node, vars) {
   switch (node.k) {
     case 'num': return node.v === Infinity ? Infinity : Number(node.v);
@@ -268,36 +561,51 @@ function evalFloat(node, vars) {
       if (Object.hasOwn(CONSTANTS, node.name)) return CONSTANTS[node.name];
       throw new CalcError(`Unknown identifier '${node.name}'`, node.pos);
     }
+    case 'vec': {
+      const vals = node.items.map((it) => evalFloat(it, vars));
+      if (vals.every((v) => typeof v === 'number')) {
+        const data = [vals];
+        if (vals.length > MAX_MATRIX_ELEMENTS) throw new CalcError('matrix too large', node.pos);
+        return mat(data);
+      }
+      if (vals.every(isMat)) {
+        if (!vals.every((v) => v.data.length === 1)) throw new CalcError('matrix rows must be vectors like [1,2,3]', node.pos);
+        const cols = vals[0].data[0].length;
+        if (!vals.every((v) => v.data[0].length === cols)) throw new CalcError('matrix rows must all have the same length', node.pos);
+        if (vals.length * cols > MAX_MATRIX_ELEMENTS) throw new CalcError('matrix too large', node.pos);
+        return mat(vals.map((v) => v.data[0]));
+      }
+      throw new CalcError('list items must be all numbers or all equally-sized row vectors', node.pos);
+    }
+    case 'tpose': {
+      const v = evalFloat(node.e, vars);
+      if (!isMat(v)) throw new CalcError(`transpose (') requires a matrix`, node.pos);
+      return matTranspose(v);
+    }
     case 'un': {
       const v = evalFloat(node.e, vars);
+      if (isMat(v)) return node.op === '-' ? mat(v.data.map((r) => r.map((x) => -x))) : v;
       return node.op === '-' ? -v : v;
     }
-    case 'fact': return factorialFloat(evalFloat(node.e, vars), node.pos);
+    case 'fact': {
+      const v = evalFloat(node.e, vars);
+      if (isMat(v)) throw new CalcError('factorial is undefined for matrices', node.pos);
+      return factorialFloat(v, node.pos);
+    }
     case 'bin': {
-      const l = evalFloat(node.l, vars);
-      const r = evalFloat(node.r, vars);
-      switch (node.op) {
-        case '+': return l + r;
-        case '-': return l - r;
-        case '*': return l * r;
-        case '/': if (r === 0) throw new CalcError('division by zero', node.pos); return l / r;
-        case '%': if (r === 0) throw new CalcError('modulo by zero', node.pos); return l % r;
-        case '^': return powFloat(l, r, node.pos);
-      }
-      break;
+      return binOpFloat(node.op, evalFloat(node.l, vars), evalFloat(node.r, vars), node.pos);
     }
     case 'call': {
       const variadic = VARIADIC[node.name];
-      if (variadic) {
-        const args = node.args.map((a) => evalFloat(a, vars));
-        if (args.length === 0) throw new CalcError(`function '${node.name}' needs at least one argument`, node.pos);
-        return checked(variadic(...args), node.pos);
-      }
-      const fn = FUNCTIONS[node.name];
+      const fn = variadic ?? FUNCTIONS[node.name] ?? MATRIX_FUNCTIONS[node.name];
       if (!fn) throw new CalcError(`Unknown function '${node.name}'`, node.pos);
       const args = node.args.map((a) => evalFloat(a, vars));
-      if (args.some((a) => !Number.isFinite(a))) throw new CalcError('function argument is not finite', node.pos);
-      return checked(fn(args, node.pos), node.pos);
+      if (variadic && args.length === 0) throw new CalcError(`function '${node.name}' needs at least one argument`, node.pos);
+      if (args.some(isMat) && !MATRIX_FUNCTIONS[node.name]) {
+        throw new CalcError(`function '${node.name}' does not accept matrix arguments`, node.pos);
+      }
+      if (args.some((a) => !isMat(a) && !Number.isFinite(a))) throw new CalcError('function argument is not finite', node.pos);
+      return checkedAny(variadic ? variadic(...args) : fn(args, node.pos), node.pos);
     }
   }
   throw new CalcError('internal: unknown node');
@@ -307,6 +615,12 @@ function formatFloat(x) {
   if (Number.isInteger(x) && Math.abs(x) < 1e21) return String(x);
   const rounded = parseFloat(x.toPrecision(15));
   return String(rounded);
+}
+
+function formatValue(x) {
+  if (!isMat(x)) return formatFloat(x);
+  if (x.data.length === 1) return `[${x.data[0].map(formatFloat).join(', ')}]`;
+  return `[${x.data.map((r) => `[${r.map(formatFloat).join(', ')}]`).join(', ')}]`;
 }
 
 /* ------------------------- exact decimal evaluator ------------------------ */
@@ -444,11 +758,34 @@ function evalExact(node, vars) {
     }
     case 'call':
       throw new CalcError(`function '${node.name}' is unavailable in exact mode (only + - * / % integer ^ and !)`, node.pos);
+    case 'vec':
+    case 'tpose':
+      throw new CalcError('matrices are unavailable in exact mode; use precision "float"', node.pos);
   }
   throw new CalcError('internal: unknown node');
 }
 
 /* --------------------------------- public --------------------------------- */
+
+function parseMatVariable(arr, name) {
+  if (arr.length === 0) throw new CalcError(`variable '${name}': empty matrix`);
+  if (arr.every((v) => typeof v === 'number')) {
+    if (!arr.every(Number.isFinite)) throw new CalcError(`variable '${name}': matrix elements must be finite numbers`);
+    return mat([arr.slice()]);
+  }
+  if (arr.every(Array.isArray)) {
+    const cols = arr[0].length;
+    if (cols === 0) throw new CalcError(`variable '${name}': matrix rows must be non-empty`);
+    for (const row of arr) {
+      if (row.length !== cols || !row.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+        throw new CalcError(`variable '${name}': rows must be equally-sized arrays of finite numbers`);
+      }
+    }
+    if (arr.length * cols > MAX_MATRIX_ELEMENTS) throw new CalcError(`variable '${name}': matrix too large`);
+    return mat(arr.map((r) => r.slice()));
+  }
+  throw new CalcError(`variable '${name}': matrix must be an array of numbers or an array of rows`);
+}
 
 function coerceVariables(variables, exact) {
   const out = {};
@@ -461,8 +798,11 @@ function coerceVariables(variables, exact) {
       out[name] = exact ? Dec.fromNumber(value) : value;
     } else if (typeof value === 'string' && value.trim() !== '') {
       out[name] = exact ? Dec.parse(value) : checked(Number(value));
+    } else if (Array.isArray(value)) {
+      if (exact) throw new CalcError(`variable '${name}': matrices are unavailable in exact mode`);
+      out[name] = parseMatVariable(value, name);
     } else {
-      throw new CalcError(`variable '${name}' must be a number or numeric string`);
+      throw new CalcError(`variable '${name}' must be a number, numeric string, or matrix array`);
     }
   }
   return out;
@@ -493,7 +833,7 @@ export function calculate(input) {
     try {
       const ast = parse(expr);
       const value = exact ? evalExact(ast, vars) : evalFloat(ast, vars);
-      const text = exact ? value.toString() : formatFloat(value);
+      const text = exact ? value.toString() : formatValue(value);
       return { expression: expr, result: text };
     } catch (err) {
       if (err instanceof CalcError) return { expression: expr, error: err.message };

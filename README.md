@@ -14,7 +14,12 @@ in one dependency-free file, [`core.js`](./core.js).
 - **Constants**: `pi e tau phi inf`.
 - **Functions**: `sqrt cbrt abs sign ceil floor round trunc exp expm1 ln log(x) log(x,base) log2 log10
   sin cos tan asin acos atan atan2 sinh cosh tanh pow mod gcd lcm min max hypot radians degrees`.
-- **Variables**: pass `variables: {"r": 3.5}` and reference `r` in the expression.
+- **Matrices** (float mode): literals `[[1,2],[3,4]]`, row vectors `[1,2,3]`; `+ -` elementwise,
+  `*` matrix multiply (`A * [x,y]` treats the vector as a column), scalar `*` and `/`,
+  `A^n` integer power (negative = inverse), `A'` transpose; functions
+  `det inv transpose trace rank solve(A,b) dot cross norm eye zeros ones shape`.
+- **Variables**: pass `variables: {"r": 3.5}` and reference `r` in the expression;
+  a value may also be a matrix (`number[][]`) or a vector (`number[]`).
 - **Batches**: pass an array as `expression`, up to 50 expressions per call.
 - **Actionable errors**: syntax, domain and division-by-zero failures come back with a position, so the
   model can correct itself instead of guessing.
@@ -49,6 +54,10 @@ estimating.
 { "expression": "price * qty",
   "variables": { "price": "19.99", "qty": 3 },
   "precision": "exact" }                                   // → 59.97
+// matrices
+{ "expression": "[[1,2],[3,4]] * [[5,6],[7,8]]" }          // → [[19, 22], [43, 50]]
+{ "expression": "solve([[2,1],[1,3]], [1,2])" }            // → [0.2, 0.6]
+{ "expression": "det(A)", "variables": { "A": [[1,2],[3,4]] } }  // → -2
 ```
 
 ## OpenCode (optional)
@@ -70,7 +79,7 @@ Re-copy `calculator.core.js` after upgrading the engine, so both sides stay on t
 ## Development
 
 ```powershell
-node test.js   # 44 assertions, no dependencies
+node test.js   # 81 assertions, no dependencies
 ```
 
 ## License

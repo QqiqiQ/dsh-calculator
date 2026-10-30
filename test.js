@@ -69,5 +69,46 @@ eq(resultOf({ expression: 'sqrt(2)', precision: 'exact' }).startsWith("ERROR: fu
 eq(resultOf({ expression: 'pi', precision: 'exact' }).startsWith("ERROR: constant 'pi'"), true, 'exact pi rejected');
 eq(resultOf({ expression: '1 / 0', precision: 'exact' }).startsWith('ERROR: division by zero'), true, 'exact div zero');
 
+// matrices (float)
+eq(resultOf({ expression: '[[1,2],[3,4]] * [[5,6],[7,8]]' }), '[[19, 22], [43, 50]]', 'matmul');
+eq(resultOf({ expression: 'det([[1,2],[3,4]])' }), '-2', 'det');
+eq(resultOf({ expression: 'inv([[1,2],[3,4]])' }), '[[-2, 1], [1.5, -0.5]]', 'inv');
+eq(resultOf({ expression: 'trace([[1,2],[3,4]])' }), '5', 'trace');
+eq(resultOf({ expression: '[[1,2],[3,4]]\'' }), '[[1, 3], [2, 4]]', 'transpose postfix');
+eq(resultOf({ expression: 'transpose([[1,2],[3,4]])' }), '[[1, 3], [2, 4]]', 'transpose fn');
+eq(resultOf({ expression: '[[1,2],[3,4]]^2' }), '[[7, 10], [15, 22]]', 'matrix power');
+eq(resultOf({ expression: '[[1,2],[3,4]]^0' }), '[[1, 0], [0, 1]]', 'matrix power zero');
+eq(resultOf({ expression: '[[1,2],[3,4]]^-1' }), '[[-2, 1], [1.5, -0.5]]', 'matrix power negative = inv');
+eq(resultOf({ expression: '[1,2,3] + [4,5,6]' }), '[5, 7, 9]', 'vector add');
+eq(resultOf({ expression: '2 * [1,2,3]' }), '[2, 4, 6]', 'scalar * vector');
+eq(resultOf({ expression: '[2,4,6] / 2' }), '[1, 2, 3]', 'vector / scalar');
+eq(resultOf({ expression: '-[[1,2],[3,4]]' }), '[[-1, -2], [-3, -4]]', 'unary minus matrix');
+eq(resultOf({ expression: 'dot([1,2,3],[4,5,6])' }), '32', 'dot');
+eq(resultOf({ expression: 'cross([1,0,0],[0,1,0])' }), '[0, 0, 1]', 'cross');
+eq(resultOf({ expression: 'norm([3,4])' }), '5', 'norm');
+eq(resultOf({ expression: 'solve([[2,1],[1,3]],[1,2])' }), '[0.2, 0.6]', 'solve');
+eq(resultOf({ expression: 'rank([[1,2],[2,4]])' }), '1', 'rank');
+eq(resultOf({ expression: 'rank([[1,2],[3,4]])' }), '2', 'rank full');
+eq(resultOf({ expression: 'eye(2) * [[1,2],[3,4]]' }), '[[1, 2], [3, 4]]', 'eye identity');
+eq(resultOf({ expression: 'zeros(2)' }), '[[0, 0], [0, 0]]', 'zeros square');
+eq(resultOf({ expression: 'ones(2,1)' }), '[[1], [1]]', 'ones rect');
+eq(resultOf({ expression: 'shape([[1,2,3],[4,5,6]])' }), '[2, 3]', 'shape');
+eq(resultOf({ expression: 'det(A)', variables: { A: [[1, 2], [3, 4]] } }), '-2', 'matrix variable');
+eq(resultOf({ expression: 'A * b', variables: { A: [[1, 2], [3, 4]], b: [5, 6] } }), '[17, 39]', 'matrix * vector variable');
+
+// matrix errors
+eq(resultOf({ expression: 'det([1,2,3])' }).startsWith('ERROR: det requires a square matrix'), true, 'det nonsquare');
+eq(resultOf({ expression: '[[1,2]] + [[1,2,3]]' }).startsWith('ERROR: matrix size mismatch'), true, 'add shape mismatch');
+eq(resultOf({ expression: '[[1,2],[3,4]] * [[1,2,3]]' }).startsWith('ERROR: matrix size mismatch'), true, 'matmul mismatch');
+eq(resultOf({ expression: 'inv([[1,2],[2,4]])' }).startsWith('ERROR: matrix is singular'), true, 'inv singular');
+eq(resultOf({ expression: 'solve([[1,2],[2,4]],[1,2])' }).startsWith('ERROR: no unique solution'), true, 'solve singular');
+eq(resultOf({ expression: '[1,2] + 1' }).startsWith('ERROR: cannot add a scalar and a matrix'), true, 'scalar+matrix');
+eq(resultOf({ expression: '[[1,2],[3,4]] / [[1,0],[0,1]]' }).startsWith('ERROR: matrix/matrix division is undefined'), true, 'matrix/matrix div');
+eq(resultOf({ expression: 'sqrt([1,2])' }).startsWith("ERROR: function 'sqrt' does not accept matrix"), true, 'scalar fn rejects matrix');
+eq(resultOf({ expression: '[[1,2],[3,4]]!' }).startsWith('ERROR: factorial is undefined for matrices'), true, 'matrix factorial');
+eq(resultOf({ expression: "5'" }).startsWith('ERROR: transpose'), true, 'transpose scalar');
+eq(resultOf({ expression: '[[1,2],[3]]' }).startsWith('ERROR: matrix rows must all have the same length'), true, 'ragged matrix');
+eq(resultOf({ expression: '[[1,2],[3,4]]', precision: 'exact' }).startsWith('ERROR: matrices are unavailable in exact mode'), true, 'exact matrix rejected');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

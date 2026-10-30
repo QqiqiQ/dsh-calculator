@@ -3,12 +3,17 @@ import { calculate, CalcError } from './core.js';
 const TOOL_DESCRIPTION =
   'Evaluate math expressions with a deterministic engine instead of mental arithmetic. ' +
   'Use for any numeric computation: arithmetic, powers, roots, trig, logarithms, factorials, ' +
-  'variables, batches, and exact decimal mode for money-style math. ' +
+  'matrix math, variables, batches, and exact decimal mode for money-style math. ' +
   'Returns exact result strings or position-tagged errors to fix and retry.';
 
 const FUNCTION_LIST =
   'sqrt cbrt abs sign ceil floor round trunc exp expm1 ln log(x) log(x,base) log2 log10 ' +
   'sin cos tan asin acos atan atan2 sinh cosh tanh pow mod gcd lcm min max hypot radians degrees';
+
+const MATRIX_SYNTAX =
+  'Matrices: [[1,2],[3,4]] (row vectors like [1,2,3]); + - * (matrix multiply), A^n integer power, ' +
+  "A' transpose; functions: det inv transpose trace rank solve(A,b) dot cross norm eye zeros ones shape. " +
+  'Matrices are unavailable in exact mode.';
 
 function renderText(value) {
   const lines = value.results.map((r) =>
@@ -29,12 +34,15 @@ const definition = {
           { type: 'array', items: { type: 'string' }, description: 'Batch: up to 50 expressions evaluated in one call.' },
         ],
         description:
-          'Operators: + - * / ^(or **) % ! and parentheses; constants: pi e tau phi inf; ' + `functions: ${FUNCTION_LIST}.`,
+          'Operators: + - * / ^(or **) % ! and parentheses; constants: pi e tau phi inf; ' +
+          `functions: ${FUNCTION_LIST}. ${MATRIX_SYNTAX}`,
       },
       variables: {
         type: 'object',
         additionalProperties: true,
-        description: 'Optional variable values referenced by name in the expression, e.g. {"r": 3.5}.',
+        description:
+          'Optional variable values referenced by name in the expression, ' +
+          'e.g. {"r": 3.5}; a value may also be a matrix as number[][] or a vector as number[].',
       },
       precision: {
         type: 'string',

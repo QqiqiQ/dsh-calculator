@@ -1,7 +1,7 @@
 {
   "name": "@qqiqiq/dsh-calculator",
-  "version": "1.0.0",
-  "description": "Deterministic math tool for DSH agents: hand-written parser (no eval), 50-expression batches, and an exact-decimal mode for money math.",
+  "version": "1.1.0",
+  "description": "Deterministic math tool for DSH agents: hand-written parser (no eval), 50-expression batches, matrices and an exact-decimal mode for money math.",
   "type": "module",
   "license": "MIT",
   "author": "QqiqiQ",
@@ -19,6 +19,7 @@
     "calculator",
     "math",
     "tool",
+    "matrix",
     "precision",
     "decimal"
   ],
