@@ -14,6 +14,10 @@ const MATRIX_SYNTAX =
   "A' transpose; functions: det inv transpose trace rank solve(A,b) dot cross norm eye zeros ones shape. " +
   "Matrices are unavailable in exact mode."
 
+const CALCULUS_SYNTAX =
+  "Numeric calculus (float mode only): integrate(f, x, a, b) definite integral of expression f over x in [a,b] " +
+  "(finite bounds), deriv(f, x, p) derivative of f at point p. Results carry ~12 significant digits."
+
 export default tool({
   description:
     "Evaluate math expressions with a deterministic engine instead of mental arithmetic. " +
@@ -26,7 +30,7 @@ export default tool({
       .describe(
         'Expression(s) to evaluate, e.g. "sqrt(2)^2" or "2*pi*r". ' +
           "Operators: + - * / ^(or **) % ! and parentheses; constants: pi e tau phi inf; " +
-          `functions: ${FUNCTION_LIST}. ${MATRIX_SYNTAX}`
+          `functions: ${FUNCTION_LIST}. ${MATRIX_SYNTAX} ${CALCULUS_SYNTAX}`
       ),
     variables: tool.schema
       .record(tool.schema.string(), tool.schema.any())

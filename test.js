@@ -110,5 +110,30 @@ eq(resultOf({ expression: "5'" }).startsWith('ERROR: transpose'), true, 'transpo
 eq(resultOf({ expression: '[[1,2],[3]]' }).startsWith('ERROR: matrix rows must all have the same length'), true, 'ragged matrix');
 eq(resultOf({ expression: '[[1,2],[3,4]]', precision: 'exact' }).startsWith('ERROR: matrices are unavailable in exact mode'), true, 'exact matrix rejected');
 
+// numeric calculus (float)
+eq(resultOf({ expression: 'integrate(x^2, x, 0, 1)' }), '0.333333333333', 'integrate x^2');
+eq(resultOf({ expression: 'integrate(x, x, 1, 0)' }), '-0.5', 'integrate reversed bounds');
+eq(resultOf({ expression: 'integrate(x^2, x, 3, 3)' }), '0', 'integrate zero width');
+eq(resultOf({ expression: 'integrate(a*x, x, 0, 1)', variables: { a: 2 } }), '1', 'integrate with variable');
+eq(resultOf({ expression: 'integrate(sin(x), x, 0, pi)' }).startsWith('2'), true, 'integrate sin = 2');
+eq(resultOf({ expression: 'integrate(1/x, x, 1, 2)' }).startsWith('0.69314718056'), true, 'integrate 1/x = ln2');
+eq(resultOf({ expression: 'integrate(exp(-x^2), x, 0, 1)' }).startsWith('0.746824132812'), true, 'integrate gaussian');
+eq(resultOf({ expression: 'integrate(sin(x)^2, x, 0, pi)' }).startsWith('1.57079632679'), true, 'integrate sin^2 = pi/2');
+eq(resultOf({ expression: 'deriv(x^3, x, 2)' }), '12', 'deriv x^3 at 2');
+eq(resultOf({ expression: 'deriv(x^2, x, 3)' }), '6', 'deriv x^2 at 3');
+eq(resultOf({ expression: 'deriv(sin(x), x, 0)' }), '1', 'deriv sin at 0');
+eq(resultOf({ expression: 'deriv(exp(x), x, 0)' }), '1', 'deriv exp at 0');
+eq(resultOf({ expression: 'deriv(a*x^2, x, 2)', variables: { a: 3 } }), '12', 'deriv with variable');
+
+// calculus errors
+eq(resultOf({ expression: 'integrate(x^2, x, 0, inf)' }).startsWith('ERROR: integrate bounds must be finite'), true, 'integrate infinite bound');
+eq(resultOf({ expression: 'integrate(1/x, x, -1, 1)' }).startsWith('ERROR:'), true, 'integrate singularity rejected');
+eq(resultOf({ expression: 'integrate(x^2, 2, 0, 1)' }).startsWith("ERROR: integrate's 2nd argument must be a variable name"), true, 'integrate bad var');
+eq(resultOf({ expression: 'integrate(x^2, x, 0)' }).startsWith('ERROR: integrate expects'), true, 'integrate arity');
+eq(resultOf({ expression: 'deriv(x, x, 0, 1)' }).startsWith('ERROR: deriv expects'), true, 'deriv arity');
+eq(resultOf({ expression: 'deriv(x^2, x, [1])' }).startsWith('ERROR: deriv point must be a finite number'), true, 'deriv matrix point');
+eq(resultOf({ expression: 'integrate(sqrt(x), x, -1, 1)' }).startsWith('ERROR: sqrt of a negative'), true, 'integrand domain error propagates');
+eq(resultOf({ expression: 'integrate(x, x, 0, 1)', precision: 'exact' }).startsWith("ERROR: function 'integrate' is unavailable"), true, 'exact integrate rejected');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

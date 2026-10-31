@@ -596,6 +596,8 @@ function evalFloat(node, vars) {
       return binOpFloat(node.op, evalFloat(node.l, vars), evalFloat(node.r, vars), node.pos);
     }
     case 'call': {
+      if (node.name === 'integrate') return evalIntegrate(node, vars);
+      if (node.name === 'deriv') return evalDeriv(node, vars);
       const variadic = VARIADIC[node.name];
       const fn = variadic ?? FUNCTIONS[node.name] ?? MATRIX_FUNCTIONS[node.name];
       if (!fn) throw new CalcError(`Unknown function '${node.name}'`, node.pos);
@@ -609,6 +611,86 @@ function evalFloat(node, vars) {
     }
   }
   throw new CalcError('internal: unknown node');
+}
+
+/* -------------------- numeric calculus (float mode) --------------------- */
+
+/** Wrap an AST as f(x): evaluate with the bound variable added to the scope. */
+function makeScopeFunction(fNode, varName, vars, what) {
+  return (x) => {
+    const scope = Object.assign(Object.create(null), vars);
+    scope[varName] = x;
+    const v = evalFloat(fNode, scope);
+    if (typeof v !== 'number') throw new CalcError(`${what} must evaluate to a number`, fNode.pos);
+    if (!Number.isFinite(v)) {
+      throw new CalcError(`${what} is not finite near x = ${formatFloat(x)} (singularity or overflow)`, fNode.pos);
+    }
+    return v;
+  };
+}
+
+function bindVar(node, fnName) {
+  if (node.k !== 'ident') {
+    throw new CalcError(`${fnName}'s 2nd argument must be a variable name, e.g. ${fnName}(x^2, x, 0, 1)`, node.pos);
+  }
+  return node.name;
+}
+
+/** integrate(f, x, a, b): definite integral via adaptive Simpson quadrature. */
+function evalIntegrate(node, vars) {
+  if (node.args.length !== 4) {
+    throw new CalcError('integrate expects integrate(f, x, a, b): expression, variable, lower bound, upper bound', node.pos);
+  }
+  const varName = bindVar(node.args[1], 'integrate');
+  const a = evalFloat(node.args[2], vars);
+  const b = evalFloat(node.args[3], vars);
+  if (isMat(a) || isMat(b)) throw new CalcError('integrate bounds must be numbers, not matrices', node.pos);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    throw new CalcError('integrate bounds must be finite (improper integrals are not supported)', node.pos);
+  }
+  const f = makeScopeFunction(node.args[0], varName, vars, 'integrand');
+  return round12(adaptiveSimpson(f, a, b));
+}
+
+/** Numeric calculus honestly delivers ~12 digits; strip float noise from the tail. */
+const round12 = (v) => parseFloat(v.toPrecision(12));
+
+function adaptiveSimpson(f, a, b) {
+  if (a === b) return 0;
+  if (b < a) return -adaptiveSimpson(f, b, a);
+  const MAX_DEPTH = 20;
+  const simpson = (fa, fm, fb, w) => (w / 6) * (fa + 4 * fm + fb);
+  const m = (a + b) / 2;
+  const fa = f(a), fm = f(m), fb = f(b);
+  const whole = simpson(fa, fm, fb, b - a);
+  const tol = 1e-12 * (1 + Math.abs(whole));
+  function rec(a2, b2, fa2, fm2, fb2, S, depth) {
+    const m2 = (a2 + b2) / 2, lm = (a2 + m2) / 2, rm = (m2 + b2) / 2;
+    const flm = f(lm), frm = f(rm);
+    const left = simpson(fa2, flm, fm2, m2 - a2);
+    const right = simpson(fm2, frm, fb2, b2 - m2);
+    const err = left + right - S;
+    if (depth <= 0 || Math.abs(err) <= 15 * tol) return left + right + err / 15;
+    return rec(a2, m2, fa2, flm, fm2, left, depth - 1) + rec(m2, b2, fm2, frm, fb2, right, depth - 1);
+  }
+  return rec(a, b, fa, fm, fb, whole, MAX_DEPTH);
+}
+
+/** deriv(f, x, p): derivative at p via central difference + Richardson extrapolation. */
+function evalDeriv(node, vars) {
+  if (node.args.length !== 3) {
+    throw new CalcError('deriv expects deriv(f, x, point): expression, variable, point', node.pos);
+  }
+  const varName = bindVar(node.args[1], 'deriv');
+  const x0 = evalFloat(node.args[2], vars);
+  if (isMat(x0) || !Number.isFinite(x0)) throw new CalcError('deriv point must be a finite number', node.pos);
+  const f = makeScopeFunction(node.args[0], varName, vars, 'derivand');
+  const h = 1e-3 * Math.max(1, Math.abs(x0));
+  const D = (s) => (f(x0 + s) - f(x0 - s)) / (2 * s);
+  const d1 = D(h), d2 = D(h / 2), d3 = D(h / 4);
+  const r1 = d2 + (d2 - d1) / 3; // Richardson: cancels the O(h^2) term
+  const r2 = d3 + (d3 - d2) / 3;
+  return round12(r2 + (r2 - r1) / 15); // cancels the O(h^4) term
 }
 
 function formatFloat(x) {

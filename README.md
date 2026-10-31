@@ -18,6 +18,9 @@ in one dependency-free file, [`core.js`](./core.js).
   `*` matrix multiply (`A * [x,y]` treats the vector as a column), scalar `*` and `/`,
   `A^n` integer power (negative = inverse), `A'` transpose; functions
   `det inv transpose trace rank solve(A,b) dot cross norm eye zeros ones shape`.
+- **Numeric calculus** (float mode): `integrate(f, x, a, b)` definite integral (adaptive Simpson,
+  finite bounds), `deriv(f, x, p)` derivative at a point (central difference + Richardson).
+  Results carry ~12 significant digits.
 - **Variables**: pass `variables: {"r": 3.5}` and reference `r` in the expression;
   a value may also be a matrix (`number[][]`) or a vector (`number[]`).
 - **Batches**: pass an array as `expression`, up to 50 expressions per call.
@@ -58,6 +61,9 @@ estimating.
 { "expression": "[[1,2],[3,4]] * [[5,6],[7,8]]" }          // → [[19, 22], [43, 50]]
 { "expression": "solve([[2,1],[1,3]], [1,2])" }            // → [0.2, 0.6]
 { "expression": "det(A)", "variables": { "A": [[1,2],[3,4]] } }  // → -2
+// numeric calculus
+{ "expression": "integrate(sin(x), x, 0, pi)" }            // → 2
+{ "expression": "deriv(x^3, x, 2)" }                       // → 12
 ```
 
 ## OpenCode (optional)
@@ -79,7 +85,7 @@ Re-copy `calculator.core.js` after upgrading the engine, so both sides stay on t
 ## Development
 
 ```powershell
-node test.js   # 81 assertions, no dependencies
+node test.js   # 102 assertions, no dependencies
 ```
 
 ## License
